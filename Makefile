@@ -2126,6 +2126,7 @@ Q3DOBJ = \
 ifeq ($(BUILD_QIRCBOT),1)
   Q3DOBJ += $(B)/ded/sv_irc.o
   LIBS += -lircclient -lpthread
+  SERVER_CFLAGS += -DBUILD_QIRCBOT
 endif
 
 ifeq ($(ARCH),x86)

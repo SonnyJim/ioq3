@@ -32,10 +32,6 @@ given client
 ===============
 */
 
-//#ifdef BUILD_QIRCBOT
-//breakthisbit
-extern int irc_init (void);
-//#endif
 
 static void SV_SendConfigstring(client_t *client, int index)
 {
@@ -294,7 +290,9 @@ static void SV_Startup( void ) {
 	// Join the ipv6 multicast group now that a map is running so clients can scan for us on the local network.
 	NET_JoinMulticast6();
 
+#ifdef BUILD_QIRCBOT
 	irc_init ();
+#endif
 }
 
 

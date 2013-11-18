@@ -8,17 +8,11 @@
 
 #include "server.h"
 
-#ifndef QIRCBOT_CHANNEL
 #define QIRCBOT_CHANNEL "#qircbot"
-#endif
 
-#ifndef QIRCBOT_SERVER
 #define QIRCBOT_SERVER "irc.efnet.org"
-#endif
 
-#ifndef QIRCBOT_NICK
 #define QIRCBOT_NICK "qircbot"
-#endif
 
 #define NICKLEN 16
 #define MAXNICKS 255
@@ -27,6 +21,11 @@ irc_session_t *session;
 
 char botnicks[MAXNICKS][NICKLEN];
 int num_nicks = 0;
+
+cvar_t *sv_irc_nick;
+cvar_t *sv_irc_server;
+cvar_t *sv_irc_channel;
+
 
 #define CREATE_THREAD(id,func,param) (pthread_create (id, 0, func, (void *) param) != 0)
 #define THREAD_FUNCTION(funcname) static void * funcname (void * arg)
@@ -67,21 +66,19 @@ void strip_nicks (char *nicklist)
 //Connected to a server
 void event_connect (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
-	Com_Printf ("Connected to %s\n", QIRCBOT_SERVER);
-	if (irc_cmd_join (session, QIRCBOT_CHANNEL, 0))
+	char channel[16];
+
+	Com_Printf ("Connected to IRC server\n");
+
+	Q_strncpyz(channel, sv_irc_channel->string, sizeof(channel));
+
+	if (irc_cmd_join (session, channel, 0))
 	{
 		Com_Printf ("Error joining channel\n");
 	}
 	else
-		Com_Printf ("Joined %s\n", QIRCBOT_CHANNEL);
-	//Get channel names
-	//redundant, we get a list on join anyway.
-	/*
-	if (irc_cmd_names (session, "#test"))
-	{
-		Com_Printf ("Error fetching names");
-	}
-*/
+		Com_Printf ("Joined %s\n", channel);
+	
 	//irc_cmd_msg (session, "Sonny_Jim", "I'm awake");
 }
 
@@ -176,7 +173,9 @@ void event_channel (irc_session_t * session, const char * event, const char * or
 
 int irc_init (void)
 {
-	Com_Printf ("IRC Client init\n");
+	char nick[NICKLEN], server[255];
+
+	Com_Printf ("IRC Client initilising\n");
 	// The IRC callbacks structure
 	irc_callbacks_t callbacks;
 
@@ -193,7 +192,13 @@ int irc_init (void)
 	callbacks.event_kick = event_kick;
 	callbacks.event_ctcp_action = event_ctcp_action;
 
-	// Set up the rest of events
+	sv_irc_nick  = Cvar_Get ("sv_irc_nick", QIRCBOT_NICK, CVAR_ARCHIVE);
+	sv_irc_server  = Cvar_Get ("sv_irc_server", QIRCBOT_SERVER, CVAR_ARCHIVE);
+	sv_irc_channel  = Cvar_Get ("sv_irc_channel", QIRCBOT_CHANNEL, CVAR_ARCHIVE);
+
+
+	Q_strncpyz(nick, sv_irc_nick->string, sizeof(nick));
+	Q_strncpyz(server, sv_irc_server->string, sizeof(server));
 
 	// Now create the session
 	session = irc_create_session(&callbacks);
@@ -205,8 +210,8 @@ int irc_init (void)
 		return 1;
 	}
 	irc_option_set (session, LIBIRC_OPTION_STRIPNICKS);
-	Com_Printf ("Connecting to %s\n", QIRCBOT_SERVER);
-	if (irc_connect (session, QIRCBOT_SERVER, 6667, 0, QIRCBOT_NICK, "QIRCBOT", "QIRCBOT"))
+	Com_Printf ("Connecting to %s\n", server);
+	if (irc_connect (session, server, 6667, 0, nick, "QIRCBOT", "QIRCBOT"))
 	{
 		Com_Printf ("Error connecting\n");
 		return 1;
