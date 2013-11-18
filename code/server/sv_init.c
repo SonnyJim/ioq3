@@ -31,6 +31,12 @@ Creates and sends the server command necessary to update the CS index for the
 given client
 ===============
 */
+
+//#ifdef BUILD_QIRCBOT
+//breakthisbit
+extern int irc_init (void);
+//#endif
+
 static void SV_SendConfigstring(client_t *client, int index)
 {
 	int maxChunkSize = MAX_STRING_CHARS - 24;
@@ -287,6 +293,8 @@ static void SV_Startup( void ) {
 	
 	// Join the ipv6 multicast group now that a map is running so clients can scan for us on the local network.
 	NET_JoinMulticast6();
+
+	irc_init ();
 }
 
 
@@ -696,6 +704,7 @@ void SV_Init (void)
 	
 	// Load saved bans
 	Cbuf_AddText("rehashbans\n");
+
 }
 
 

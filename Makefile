@@ -2123,6 +2123,11 @@ Q3DOBJ = \
   $(B)/ded/con_log.o \
   $(B)/ded/sys_main.o
 
+ifeq ($(BUILD_QIRCBOT),1)
+  Q3DOBJ += $(B)/ded/sv_irc.o
+  LIBS += -lircclient -lpthread
+endif
+
 ifeq ($(ARCH),x86)
   Q3DOBJ += \
       $(B)/ded/matha.o \
