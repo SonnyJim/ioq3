@@ -1637,7 +1637,7 @@ static qboolean SV_ClientCommand( client_t *cl, msg_t *msg ) {
 #ifdef BUILD_QIRCBOT
 	if (strncmp (s, "say", 3) == 0)
 	{
-		extern void irc_send_chat (char * text, char *nick);
+		extern void irc_send_chat (const char * text, char *nick);
 		Com_Printf ("Detected player say command\n");
 		irc_send_chat (s, cl->name);
 	}

@@ -42,9 +42,9 @@ THREAD_FUNCTION(irc_listen)
 	return 0;
 }
 
-void irc_send_chat (char * text, char * nick)
+void irc_send_chat (const char * text, char * nick)
 {
-	char irc_msg[255];
+	char irc_msg[1024];
 
 	strcpy (irc_msg, "");
 	strcat (irc_msg, nick);
@@ -66,16 +66,27 @@ static void kick_bot (const char * nick)
 
 static void add_bot (const char *nick)
 {
-	char addbot_string1[] = "addbot ";
-	char addbot_string2[] = " 1 blue 0 ";
 	char addbot_buff[128];
 	Com_Printf ("Adding nick %s as %s\n", nick, sv_irc_bottype->string);
 
-	//Clear buffer
 	strcpy (addbot_buff, "");
-	Q_strcat (addbot_buff, sizeof(addbot_buff), addbot_string1);
-	Q_strcat (addbot_buff, sizeof(addbot_buff), sv_irc_bottype->string);
-	Q_strcat (addbot_buff, sizeof(addbot_buff), addbot_string2);
+	Q_strcat (addbot_buff, sizeof(addbot_buff), "addbot ");
+	
+	//Add bot type
+	//If Op, make them badass
+	if (strncmp (nick, "@", 1) == 0)
+	{
+		Q_strcat (addbot_buff, sizeof(addbot_buff), "xaero");
+		Q_strcat (addbot_buff, sizeof(addbot_buff), " 5 ");
+	}
+	else
+	{
+		Q_strcat (addbot_buff, sizeof(addbot_buff), sv_irc_bottype->string);
+		Q_strcat (addbot_buff, sizeof(addbot_buff), " 1 ");
+	}
+	// Add team/delay
+	Q_strcat (addbot_buff, sizeof(addbot_buff), "blue 0 ");
+	// Add the name
 	Q_strcat (addbot_buff, sizeof(addbot_buff), nick);
 	Com_Printf ("Executing: %s\n", addbot_buff);
 	Cbuf_ExecuteText (EXEC_APPEND, addbot_buff);
