@@ -14,13 +14,17 @@
 
 #define QIRCBOT_NICK "qircbot"
 
-#define NICKLEN 16
-#define MAXNICKS 255
+#define NICKLEN 64
+#define MAXNICKS 64
 
 irc_session_t *session;
 
+const char addbot_string[] = "addbot crash 1 blue 0 ";
+char botnick[NICKLEN], server[255];
 char botnicks[MAXNICKS][NICKLEN];
 int num_nicks = 0;
+
+extern int botlibsetup;
 
 cvar_t *sv_irc_nick;
 cvar_t *sv_irc_server;
@@ -39,29 +43,47 @@ THREAD_FUNCTION(irc_listen)
 	return 0;
 }
 
-void strip_nicks (char *nicklist)
+void kick_nick (const char * nick)
 {
-	char * nick = NULL;
-	nick = strtok (nicklist, " ");
-	int nickpos = 0;
-	int i;
+	char kickbot_string[64] = "kick ";
+	Com_Printf ("%s left channel\n", nick);
+	
+	Q_strcat (kickbot_string, sizeof(kickbot_string), nick);
+	Cmd_ExecuteString (kickbot_string);
+}
 
+static void add_nick (const char *nick)
+{
+	char nickbuf[255] = "";
+	Com_Printf ("adding nick %s\n", nick);
+	
+	Q_strcat (nickbuf, sizeof(nickbuf), addbot_string);
+	Q_strcat (nickbuf, sizeof(nickbuf), nick);
+	Com_Printf ("Executing %s\n", nickbuf);
+	Cbuf_ExecuteText (EXEC_APPEND, nickbuf);
+	//Cmd_ExecuteString (nickbuf);
+}
+
+static void strip_nicks (const char * nicklist)
+{
+	char *nick, *cp;
+	
+	cp = strdup (nicklist);
+	nick = strtok (cp, " ");
+	int nickpos = 0;
+	
 	while (nick)
 	{
-		Com_Printf ("Nick %s position %d\n", nick, nickpos);
+		Com_Printf ("Adding %s position %d\n", nick, nickpos);
+		add_nick (nick);
 		strcpy (botnicks[nickpos], nick); 
+		sleep (1);
 		nick = strtok (NULL, " ");
 		nickpos++;
 		num_nicks++;
 	}
 	Com_Printf ("num_nicks %d\n", num_nicks);
-	
-	for (i = 0; i < num_nicks; i++)
-	{
-		Com_Printf ("botnick %d %s\n", i, botnicks[i]);
-	}
 }
-
 
 //Connected to a server
 void event_connect (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
@@ -69,9 +91,13 @@ void event_connect (irc_session_t * session, const char * event, const char * or
 	char channel[16];
 
 	Com_Printf ("Connected to IRC server\n");
-
+	//Sleep until q3 server is ready to add bots FIXME
+	while (!botlibsetup)
+	{
+		Com_Printf ("Waiting for BotLib to be ready\n");
+		sleep (1);
+	}
 	Q_strncpyz(channel, sv_irc_channel->string, sizeof(channel));
-
 	if (irc_cmd_join (session, channel, 0))
 	{
 		Com_Printf ("Error joining channel\n");
@@ -82,29 +108,9 @@ void event_connect (irc_session_t * session, const char * event, const char * or
 	//irc_cmd_msg (session, "Sonny_Jim", "I'm awake");
 }
 
-static void kick_nick (const char * nick)
-{
-	char kickbot_string[64] = "kick ";
-	Com_Printf ("%s left channel\n", nick);
-	
-	strcat (kickbot_string, nick);
-	Cmd_ExecuteString (kickbot_string);
-}
-
-static void add_nick (const char * nick)
-{
-	char addbot_string[64] = "addbot grunt 1 blue 0 ";
-	Com_Printf ("%s joined channel\n", nick);
-	
-	strcat (addbot_string, nick);
-	Cmd_ExecuteString (addbot_string);
-}
-
 void event_nick (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
 	char nickbuf[16];
-	char addbot_string[255] = "addbot grunt 1 blue 0 ";
-
 	if ( !origin || count != 1 )
 		return;
 
@@ -125,7 +131,8 @@ void event_privmsg (irc_session_t * session, const char * event, const char * or
 
 void event_join (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
-	add_nick (origin);
+	//FIXME
+	//add_nick (origin);
 }
 
 void event_part (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
@@ -135,7 +142,7 @@ void event_part (irc_session_t * session, const char * event, const char * origi
 
 void event_kick (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
-	        kick_nick (params[1]);
+	kick_nick (params[1]);
 }
 
 void event_ctcp_action (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
@@ -173,7 +180,6 @@ void event_channel (irc_session_t * session, const char * event, const char * or
 
 int irc_init (void)
 {
-	char nick[NICKLEN], server[255];
 
 	Com_Printf ("IRC Client initilising\n");
 	// The IRC callbacks structure
@@ -197,7 +203,7 @@ int irc_init (void)
 	sv_irc_channel  = Cvar_Get ("sv_irc_channel", QIRCBOT_CHANNEL, CVAR_ARCHIVE);
 
 
-	Q_strncpyz(nick, sv_irc_nick->string, sizeof(nick));
+	Q_strncpyz(botnick, sv_irc_nick->string, sizeof(botnick));
 	Q_strncpyz(server, sv_irc_server->string, sizeof(server));
 
 	// Now create the session
@@ -211,7 +217,7 @@ int irc_init (void)
 	}
 	irc_option_set (session, LIBIRC_OPTION_STRIPNICKS);
 	Com_Printf ("Connecting to %s\n", server);
-	if (irc_connect (session, server, 6667, 0, nick, "QIRCBOT", "QIRCBOT"))
+	if (irc_connect (session, server, 6667, 0, botnick, "QIRCBOT", "QIRCBOT"))
 	{
 		Com_Printf ("Error connecting\n");
 		return 1;
