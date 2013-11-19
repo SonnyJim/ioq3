@@ -1634,6 +1634,14 @@ static qboolean SV_ClientCommand( client_t *cl, msg_t *msg ) {
 	// don't allow another command for one second
 	cl->nextReliableTime = svs.time + 1000;
 
+#ifdef BUILD_QIRCBOT
+	if (strncmp (s, "say", 3) == 0)
+	{
+		extern void irc_send_chat (char * text, char *nick);
+		Com_Printf ("Detected player say command\n");
+		irc_send_chat (s, cl->name);
+	}
+#endif
 	SV_ExecuteClientCommand( cl, s, clientOk );
 
 	cl->lastClientCommand = seq;
