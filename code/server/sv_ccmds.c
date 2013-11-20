@@ -1147,10 +1147,9 @@ extern cvar_t *sv_irc_channel;
 
 void SV_StatusIRC (const char * nick) 
 {
-	int			i, j, l;
+	int	i;
 	client_t	*cl;
 	playerState_t	*ps;
-	const char		*s;
 	char irc_buff[255];
 
 	Com_Printf( "Sending server status via IRC\n" );
