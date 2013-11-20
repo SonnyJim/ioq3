@@ -1175,7 +1175,6 @@ void SV_StatusIRC (const char * nick)
 			continue;
 		ps = SV_GameClientNum( i );
 		
-		Com_Printf ("%5i ", ps->persistant[PERS_SCORE]);
 		sprintf (irc_buff, "%5i %s", ps->persistant[PERS_SCORE], cl->name);
 		irc_send_to_nick (irc_buff, nick);
 	}

@@ -14,13 +14,18 @@
 #define QIRCBOT_DEFAULTBOT "crash"
 
 #define NICKLEN 64
-#define MAXNICKS 64
 #define BOT_LIMIT 64
+
+#define CTCP_PING_DELAY 60
+
+enum thread_t { IRC_MONITOR, IRC_PING };
+
 irc_session_t *session;
 
-char botnick[NICKLEN], server[255];
-char botnicks[MAXNICKS][NICKLEN];
-int num_nicks = 0;
+// List of botnames curently running
+char botnicks[BOT_LIMIT][NICKLEN];
+// How many bots are running
+int bot_count = 0;
 
 extern int botlibsetup;
 extern void SV_StatusIRC (const char * nick);
@@ -29,19 +34,7 @@ cvar_t *sv_irc_nick;
 cvar_t *sv_irc_server;
 cvar_t *sv_irc_channel;
 cvar_t *sv_irc_bottype;
-
-
-#define CREATE_THREAD(id,func,param) (pthread_create (id, 0, func, (void *) param) != 0)
-#define THREAD_FUNCTION(funcname) static void * funcname (void * arg)
-#define thread_id_t pthread_t
-#define _GNU_SOURCE
-
-THREAD_FUNCTION(irc_listen)
-{
-	irc_session_t * sp = (irc_session_t *) arg;
-	irc_run(sp);
-	return 0;
-}
+cvar_t *sv_irc_enabled;
 
 void irc_send_chat (const char * text, char * nick)
 {
@@ -63,15 +56,48 @@ void irc_send_to_nick (const char * text, const char * nick)
 
 static void kick_bot (const char * nick)
 {
-	char kickbot_string[64] = "kick ";
-	Com_Printf ("%s left channel\n", nick);
-	
-	Q_strcat (kickbot_string, sizeof(kickbot_string), nick);
-	Cbuf_ExecuteText (EXEC_APPEND, kickbot_string);
+	int i;
+	char kickbot_string[64];
+
+	Com_Printf ("kick bot looking for nick %s\n", nick);
+
+	for (i = 0; i < BOT_LIMIT; i++)
+	{
+		if (strcmp (botnicks[i], nick) == 0)
+		{
+			Com_Printf ("Kicking bot %s from %i\n", botnicks[i], i);
+			strcpy (botnicks[i], "");
+			sprintf (kickbot_string, "kick %s\n", nick);
+			Cbuf_ExecuteText (EXEC_APPEND, kickbot_string);
+			return;
+		}
+	}
+
+	Com_Printf ("kick bot nick %s not found!\n", nick);
+
+
 }
 
 static void add_bot (const char *nick)
 {
+	int i;
+
+	if (bot_count > BOT_LIMIT)
+	{
+		Com_Printf ("Bot limit %i reached\n", BOT_LIMIT);
+		return;
+	}
+
+	//Check to see if nick is already running as a bot
+	for (i = 0; i < BOT_LIMIT; i++)
+	{
+		if (strcmp (botnicks[i], nick) == 0)
+		{
+			Com_Printf ("%s already exists, ignoring\n", botnicks[i]);
+			return;
+		}
+	}
+
 	char addbot_buff[128];
 	strcpy (addbot_buff, "");
 	Q_strcat (addbot_buff, sizeof(addbot_buff), "addbot ");
@@ -94,6 +120,19 @@ static void add_bot (const char *nick)
 	Q_strcat (addbot_buff, sizeof(addbot_buff), nick);
 	Com_Printf ("Executing: %s\n", addbot_buff);
 	Cbuf_ExecuteText (EXEC_APPEND, addbot_buff);
+
+	// Find a free bot slot
+	for (i = 0; i < BOT_LIMIT; i++)
+	{
+		if (strcmp (botnicks[i], "") == 0)
+		{
+			// Add the bot to botnicks
+			strcpy (botnicks[i], nick);
+			Com_Printf ("Adding botnick %i %s\n", i, botnicks[i]);
+			bot_count++;
+			break;
+		}
+	}
 }
 
 // Add all nicks from the channel
@@ -103,22 +142,15 @@ static void channel_join_nicks (const char * nicklist)
 	
 	cp = strdup (nicklist);
 	nick = strtok (cp, " ");
-	int nickpos = 0;
 	
 	while (nick)
 	{
-		if (num_nicks > BOT_LIMIT)
-			break;
-		Com_Printf ("Adding %s position %d\n", nick, nickpos);
+		Com_Printf ("Channel Join, adding %s\n", nick);
 		add_bot (nick);
-		strcpy (botnicks[nickpos], nick); 
 		//Don't spawn bots too quickly
 		sleep (1);
 		nick = strtok (NULL, " ");
-		nickpos++;
-		num_nicks++;
 	}
-	Com_Printf ("num_nicks %d\n", num_nicks);
 }
 
 //Called when connected to a server
@@ -192,13 +224,16 @@ void event_kick (irc_session_t * session, const char * event, const char * origi
 
 void event_ctcp_action (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
-	char serversay_string[255] = "say ";
-
-	strcat (serversay_string, origin);
-	strcat (serversay_string, " ");
-	strcat (serversay_string, params[1]);
-	//Com_Printf ("%s\n", serversay_string);
+	char serversay_string[255];
+	
+	sprintf (serversay_string, "say %s %s\n", origin, params[1]);
+	Com_Printf ("From %s: %s\n", sv_irc_channel->string, serversay_string);
 	Cbuf_ExecuteText (EXEC_APPEND, serversay_string);
+}
+
+void event_ctcp_rep (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
+{
+	Com_Printf ("Ping response from %s with %s\n", origin, params[0]);
 }
 
 void event_numeric (irc_session_t * session, unsigned int event, const char * origin, const char ** params, unsigned int count)
@@ -208,32 +243,99 @@ void event_numeric (irc_session_t * session, unsigned int event, const char * or
 		Com_Printf ("User list: %s\n", params[3]);
 		channel_join_nicks (params[3]);
 	}
-
-	if (event == LIBIRC_RFC_RPL_ENDOFNAMES)
+	else if (event == LIBIRC_RFC_RPL_ENDOFNAMES)
 		Com_Printf ("End of nick list\n");
+	else
+		Com_Printf ("event_numeric: %u\n", event);
 }
 
 void event_channel (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
-	char serversay_string[255] = "say ";
-
-	strcat (serversay_string, origin);
-	strcat (serversay_string, ": ");
-	strcat (serversay_string, params[1]);
-	//Com_Printf ("%s\n", serversay_string);
+	char serversay_string[255];
+	sprintf (serversay_string, "say %s: %s\n", origin, params[1]);
+	Com_Printf ("From %s: %s\n", sv_irc_channel->string, serversay_string);
 	Cbuf_ExecuteText (EXEC_APPEND, serversay_string);
+}
+
+int irc_connect_to_server (void)
+{
+	//Disconnect just to be sure
+	irc_disconnect (session);
+	irc_option_set (session, LIBIRC_OPTION_STRIPNICKS);
+	if (irc_connect (session, sv_irc_server->string, 6667, 0, sv_irc_nick->string, "qirc", "qirc"))
+	{
+		Com_Printf ("Error connecting\n");
+		return 0;
+		//There was an error
+	}
+	Com_Printf ("Connected to %s\n", sv_irc_server->string);
+	return 1;
+}
+
+//Thread to periodically ping the server to check it's still alive and to trigger reconnects
+void *irc_ping (void *threadid)
+{
+	while (1)
+	{
+		if (irc_is_connected (session))
+		{
+			irc_cmd_ctcp_request (session, sv_irc_nick->string, "PING");
+		}
+		sleep (CTCP_PING_DELAY);
+	}
+}
+
+void *irc_monitor (void *threadid)
+{
+	int reconnection_attempts = 0;
+
+	while (1)
+	{
+		if (sv_irc_enabled->integer)
+		{
+			if (!irc_is_connected (session))
+			{
+				Com_Printf ("Connecting to %s\n", sv_irc_server->string);
+				if (reconnection_attempts)
+					Com_Printf ("Reconnect attempt %i\n", reconnection_attempts);
+
+				if (irc_connect_to_server ())
+				{
+					reconnection_attempts = 0;
+					irc_run (session);
+					Com_Printf ("Disconnected from %s\n", sv_irc_server->string);
+				}
+				else
+					reconnection_attempts++;
+			}
+		}
+		else 
+		{
+			if (irc_is_connected (session))
+			{
+				Com_Printf ("Disconnecting from %s\n", sv_irc_server->string);
+				irc_disconnect (session);
+			}
+		}
+
+		if (reconnection_attempts > 12)
+			sleep (60);
+		else
+			sleep (10);
+	}
 }
 
 int irc_init (void)
 {
-
 	Com_Printf ("IRC Client initilising\n");
-	// The IRC callbacks structure
+	pthread_t irc_thread[2];
 	irc_callbacks_t callbacks;
+	int i;
 
 	// Init it
 	memset (&callbacks, 0, sizeof(callbacks));
 
+	// Setup callbacks
 	callbacks.event_connect = event_connect;
 	callbacks.event_numeric = event_numeric;
 	callbacks.event_privmsg = event_privmsg;
@@ -243,14 +345,21 @@ int irc_init (void)
 	callbacks.event_channel = event_channel;
 	callbacks.event_kick = event_kick;
 	callbacks.event_ctcp_action = event_ctcp_action;
-
+	callbacks.event_ctcp_rep = event_ctcp_rep;
+	
+	// Init cvars
 	sv_irc_nick  = Cvar_Get ("sv_irc_nick", QIRCBOT_NICK, CVAR_ARCHIVE);
 	sv_irc_server  = Cvar_Get ("sv_irc_server", QIRCBOT_SERVER, CVAR_ARCHIVE);
 	sv_irc_channel  = Cvar_Get ("sv_irc_channel", QIRCBOT_CHANNEL, CVAR_ARCHIVE);
 	sv_irc_bottype = Cvar_Get ("sv_irc_bottype", QIRCBOT_DEFAULTBOT, CVAR_ARCHIVE);
-
-	Q_strncpyz(botnick, sv_irc_nick->string, sizeof(botnick));
-	Q_strncpyz(server, sv_irc_server->string, sizeof(server));
+	sv_irc_enabled = Cvar_Get ("sv_irc_enabled", "1", CVAR_ARCHIVE);
+	
+	// Init botnicks
+	
+	for (i = 0; i < BOT_LIMIT; i++)
+	{
+		strcpy (botnicks[i], "");
+	}
 
 	// Now create the session
 	session = irc_create_session(&callbacks);
@@ -261,14 +370,6 @@ int irc_init (void)
 		Com_Printf ("Error setting up session\n");
 		return 1;
 	}
-	irc_option_set (session, LIBIRC_OPTION_STRIPNICKS);
-	Com_Printf ("Connecting to %s\n", server);
-	if (irc_connect (session, server, 6667, 0, botnick, "qirc", "qirc"))
-	{
-		Com_Printf ("Error connecting\n");
-		return 1;
-		//There was an error
-	}
 	/*
 	if (irc_run (session))
 	{
@@ -276,13 +377,11 @@ int irc_init (void)
 		return 1;
 	}
 	*/
- 	thread_id_t tid;
-	 if ( CREATE_THREAD (&tid, irc_listen, session) )
-	 {
-		 Com_Printf ("CREATE_THREAD failed: %s\n", strerror(errno));
-		 return 42;
-	 }
-	//Probably never get here, hopefully
+	// Start monitor thread
+	if (pthread_create (&irc_thread[IRC_MONITOR], NULL, irc_monitor, (void  *)0))
+		Com_Printf ("Create IRC monitor thread failed: %s\n", strerror(errno));
+	if (pthread_create (&irc_thread[IRC_PING], NULL, irc_ping, (void  *)0))
+		Com_Printf ("Create IRC Ping thread failed: %s\n", strerror(errno));
 	return 0;
 }
 
