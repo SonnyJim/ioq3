@@ -11,11 +11,13 @@
 #define QIRCBOT_CHANNEL "#qircbot"
 #define QIRCBOT_SERVER "irc.efnet.org"
 #define QIRCBOT_NICK "qircbot"
-#define QIRCBOT_DEFAULTBOT "crash"
+#define QIRCBOT_DEFAULTBOT "random"
 
 #define NICKLEN 64
 #define BOT_LIMIT 64
 
+#define NUM_BOTTYPES 32
+#define BOTTYPE_LEN 16
 #define CTCP_PING_DELAY 60
 
 enum thread_t { IRC_MONITOR, IRC_PING };
@@ -27,6 +29,9 @@ char botnicks[BOT_LIMIT][NICKLEN];
 // How many bots are running
 int bot_count = 0;
 
+const char bottypes[NUM_BOTTYPES][BOTTYPE_LEN] = {"crash", "ranger", "phobos", "mynx", "orbb", "sarge", "bitterman", "grunt", \
+	"hossman", "daemia", "hunter", "klesk", "angel", "wrack", "gorre", "slash", "anarki", "biker", "lucy", "patriot", "tankjr", \
+		"stripe", "uriel", "razor", "keel", "visor", "bones", "cadaver", "major", "sorlag", "doom", "xaero"};
 extern int botlibsetup;
 extern void SV_StatusIRC (const char * nick);
 
@@ -34,7 +39,13 @@ cvar_t *sv_irc_nick;
 cvar_t *sv_irc_server;
 cvar_t *sv_irc_channel;
 cvar_t *sv_irc_bottype;
+cvar_t *sv_irc_botskill;
 cvar_t *sv_irc_enabled;
+
+void irc_kill_event (char * killer, char * killee)
+{
+	Com_Printf ("IRC %s killed %s\n", killer, killee);
+}
 
 void irc_send_chat (const char * text, char * nick)
 {
@@ -112,8 +123,23 @@ static void add_bot (const char *nick)
 	}
 	else
 	{
-		Q_strcat (addbot_buff, sizeof(addbot_buff), sv_irc_bottype->string);
-		Q_strcat (addbot_buff, sizeof(addbot_buff), " 1 ");
+		if (strcmp (sv_irc_bottype->string, "random") == 0)
+		{
+			i = random () * NUM_BOTTYPES;
+			Com_Printf ("Picking random bot %s\n", bottypes[i]);
+			Q_strcat (addbot_buff, sizeof(addbot_buff), bottypes[i]);	
+		}
+		else
+			Q_strcat (addbot_buff, sizeof(addbot_buff), sv_irc_bottype->string);
+		
+		if (strcmp (sv_irc_botskill->string, "random") == 0)
+		{
+			i = random () * 5;
+			Com_Printf ("Picking random skill %i\n", i);
+			sprintf (addbot_buff, "%s %i ", addbot_buff, i);
+		}
+		else
+			sprintf (addbot_buff, "%s %i ", addbot_buff, sv_irc_botskill->integer);
 	}
 	// Add team/delay
 	Q_strcat (addbot_buff, sizeof(addbot_buff), "blue 0 ");
@@ -383,6 +409,7 @@ int irc_init (void)
 	sv_irc_channel  = Cvar_Get ("sv_irc_channel", QIRCBOT_CHANNEL, CVAR_ARCHIVE);
 	sv_irc_bottype = Cvar_Get ("sv_irc_bottype", QIRCBOT_DEFAULTBOT, CVAR_ARCHIVE);
 	sv_irc_enabled = Cvar_Get ("sv_irc_enabled", "1", CVAR_ARCHIVE);
+	sv_irc_botskill = Cvar_Get ("sv_irc_botskill", "1", CVAR_ARCHIVE);
 	
 	// Init botnicks
 	
