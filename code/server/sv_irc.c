@@ -15,7 +15,7 @@
 
 #define NICKLEN 64
 #define MAXNICKS 64
-
+#define BOT_LIMIT 64
 irc_session_t *session;
 
 char botnick[NICKLEN], server[255];
@@ -23,6 +23,7 @@ char botnicks[MAXNICKS][NICKLEN];
 int num_nicks = 0;
 
 extern int botlibsetup;
+extern void SV_StatusIRC (const char * nick);
 
 cvar_t *sv_irc_nick;
 cvar_t *sv_irc_server;
@@ -55,6 +56,11 @@ void irc_send_chat (const char * text, char * nick)
 	irc_cmd_msg (session, sv_irc_channel->string, irc_msg);
 }
 
+void irc_send_to_nick (const char * text, const char * nick)
+{
+	irc_cmd_msg (session, nick, text);
+}
+
 static void kick_bot (const char * nick)
 {
 	char kickbot_string[64] = "kick ";
@@ -67,8 +73,6 @@ static void kick_bot (const char * nick)
 static void add_bot (const char *nick)
 {
 	char addbot_buff[128];
-	Com_Printf ("Adding nick %s as %s\n", nick, sv_irc_bottype->string);
-
 	strcpy (addbot_buff, "");
 	Q_strcat (addbot_buff, sizeof(addbot_buff), "addbot ");
 	
@@ -103,9 +107,12 @@ static void channel_join_nicks (const char * nicklist)
 	
 	while (nick)
 	{
+		if (num_nicks > BOT_LIMIT)
+			break;
 		Com_Printf ("Adding %s position %d\n", nick, nickpos);
 		add_bot (nick);
 		strcpy (botnicks[nickpos], nick); 
+		//Don't spawn bots too quickly
 		sleep (1);
 		nick = strtok (NULL, " ");
 		nickpos++;
@@ -156,6 +163,11 @@ void event_nick (irc_session_t * session, const char * event, const char * origi
 void event_privmsg (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
 	Com_Printf ("'%s' said to qircbot (%s): %s\n", origin ? origin : "someone", params[0], params[1] );
+	if (strncmp (params[1], "scores", strlen("scores")) == 0)
+	{
+		Com_Printf ("Sending scores to %s\n", origin);
+		SV_StatusIRC (origin);
+	}
 }
 
 void event_join (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
@@ -251,7 +263,7 @@ int irc_init (void)
 	}
 	irc_option_set (session, LIBIRC_OPTION_STRIPNICKS);
 	Com_Printf ("Connecting to %s\n", server);
-	if (irc_connect (session, server, 6667, 0, botnick, "QIRCBOT", "QIRCBOT"))
+	if (irc_connect (session, server, 6667, 0, botnick, "qirc", "qirc"))
 	{
 		Com_Printf ("Error connecting\n");
 		return 1;

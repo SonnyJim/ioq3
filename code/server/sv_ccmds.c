@@ -1141,6 +1141,47 @@ static void SV_ExceptDel_f(void)
 	SV_DelBanFromList(qtrue);
 }
 
+#ifdef BUILD_QIRCBOT
+extern void irc_send_to_nick (const char * text, const char * nick);
+extern cvar_t *sv_irc_channel;
+
+void SV_StatusIRC (const char * nick) 
+{
+	int			i, j, l;
+	client_t	*cl;
+	playerState_t	*ps;
+	const char		*s;
+	char irc_buff[255];
+
+	Com_Printf( "Sending server status via IRC\n" );
+	if ( !com_sv_running->integer)
+	{
+		irc_send_to_nick ("Server not running", nick);
+		return;
+	}
+	sprintf (irc_buff, "map: %s channel: %s\n", sv_mapname->string, sv_irc_channel->string);
+	irc_send_to_nick (irc_buff, nick);
+		
+	sprintf (irc_buff, "----- -------------------");
+	irc_send_to_nick (irc_buff, nick);
+	sprintf (irc_buff, "score name");
+	irc_send_to_nick (irc_buff, nick);
+	sprintf (irc_buff, "----- -------------------");
+	irc_send_to_nick (irc_buff, nick);
+	for (i=0,cl=svs.clients ; i < sv_maxclients->integer ; i++,cl++)
+	{
+
+		if (!cl->state)
+			continue;
+		ps = SV_GameClientNum( i );
+		
+		Com_Printf ("%5i ", ps->persistant[PERS_SCORE]);
+		sprintf (irc_buff, "%5i %s", ps->persistant[PERS_SCORE], cl->name);
+		irc_send_to_nick (irc_buff, nick);
+	}
+
+}
+#endif
 /*
 ================
 SV_Status_f
