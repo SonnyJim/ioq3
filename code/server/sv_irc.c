@@ -57,7 +57,7 @@ void irc_send_to_nick (const char * text, const char * nick)
 static void kick_bot (const char * nick)
 {
 	int i;
-	char kickbot_string[64];
+	char kickbot_buff[255];
 
 	Com_Printf ("kick bot looking for nick %s\n", nick);
 
@@ -66,9 +66,10 @@ static void kick_bot (const char * nick)
 		if (strcmp (botnicks[i], nick) == 0)
 		{
 			Com_Printf ("Kicking bot %s from %i\n", botnicks[i], i);
+			sprintf (kickbot_buff, "kick %s", botnicks[i]);
+			Com_Printf ("Kickbot string %s\n", kickbot_buff);
+			Cbuf_ExecuteText (EXEC_APPEND, kickbot_buff);
 			strcpy (botnicks[i], "");
-			sprintf (kickbot_string, "kick %s\n", nick);
-			Cbuf_ExecuteText (EXEC_APPEND, kickbot_string);
 			return;
 		}
 	}
@@ -138,11 +139,13 @@ static void add_bot (const char *nick)
 // Add all nicks from the channel
 static void channel_join_nicks (const char * nicklist)
 {
+	int i;
+	int ircnick_found;
 	char *nick, *cp;
 	
 	cp = strdup (nicklist);
 	nick = strtok (cp, " ");
-	
+
 	while (nick)
 	{
 		Com_Printf ("Channel Join, adding %s\n", nick);
@@ -150,6 +153,33 @@ static void channel_join_nicks (const char * nicklist)
 		//Don't spawn bots too quickly
 		sleep (1);
 		nick = strtok (NULL, " ");
+	}
+
+	//Double check to make sure we don't have any extra bots
+
+	for (i = 0; i < BOT_LIMIT; i++)
+	{
+		ircnick_found = 0;
+		if (strcmp (botnicks[i], "") != 0)
+		{
+			cp = strdup (nicklist);
+			nick = strtok (cp, " ");
+			while (nick)
+			{
+				if (strcmp (botnicks[i], nick) == 0)
+				{
+					ircnick_found = 1;
+					break;
+				}
+				nick = strtok (NULL, " ");
+			}
+			
+			if (ircnick_found == 0)
+			{
+				Com_Printf ("Channel Join found extra bot %s, removing\n", botnicks[i]);
+				kick_bot (botnicks[i]);
+			}
+		}
 	}
 }
 
