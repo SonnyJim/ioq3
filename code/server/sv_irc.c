@@ -20,6 +20,41 @@
 #define BOTTYPE_LEN 16
 #define CTCP_PING_DELAY 60
 
+char	*DeathNames[] = {
+	"somehow",
+	"by both barrels to the face",
+	"in an humiliating fashion",
+	"by machine gunning you down",
+	"with a grenade to the face",
+	"with grenade splash",
+	"with a rocket to the face",
+	"with rocket splash",
+	"by plasmarising you to death",
+	"by plasma splash",
+	"by giving you a fresh hole",
+	"and gave you a new hair do",
+	"with a BFG",
+	"with BFG splash",
+	"MOD_WATER",
+	"MOD_SLIME",
+	"MOD_LAVA",
+	"MOD_CRUSH",
+	"MOD_TELEFRAG",
+	"MOD_FALLING",
+	"MOD_SUICIDE",
+	"MOD_TARGET_LASER",
+	"MOD_TRIGGER_HURT",
+#ifdef MISSIONPACK
+	"MOD_NAIL",
+	"MOD_CHAINGUN",
+	"MOD_PROXIMITY_MINE",
+	"MOD_KAMIKAZE",
+	"MOD_JUICED",
+#endif
+	"MOD_GRAPPLE"
+};
+
+
 enum thread_t { IRC_MONITOR, IRC_PING };
 
 irc_session_t *session;
@@ -35,16 +70,77 @@ const char bottypes[NUM_BOTTYPES][BOTTYPE_LEN] = {"crash", "ranger", "phobos", "
 extern int botlibsetup;
 extern void SV_StatusIRC (const char * nick);
 
+static void kick_bot (const char * nick);
+
 cvar_t *sv_irc_nick;
 cvar_t *sv_irc_server;
 cvar_t *sv_irc_channel;
 cvar_t *sv_irc_bottype;
 cvar_t *sv_irc_botskill;
 cvar_t *sv_irc_enabled;
+cvar_t *sv_irc_kick_on_kill;
+cvar_t *sv_irc_kills_to_channel;
 
-void irc_kill_event (char * killer, char * killee)
+cvar_t *sv_irc_autosend_nick;
+cvar_t *sv_irc_autosend_cmd;
+cvar_t *sv_irc_autosend_delay;
+
+int old_killer, old_killee, old_kill_method;
+
+void irc_kill_event (int killer, int killee, int kill_method)
 {
-	Com_Printf ("IRC %s killed %s\n", killer, killee);
+	char reason_buff[255];
+
+	//Don't print suicides/world kills
+	if (killer > 64)
+		return;
+
+	if (old_killer == killer && old_killee == killee && old_kill_method == kill_method)
+	{
+		Com_Printf ("Duplicate kill, ignoring\n");
+		return;
+	}
+
+	old_killer = killer;
+	old_killee = killee;
+	old_kill_method = kill_method;
+
+	client_t *cl, *cl1;
+	cl = svs.clients;
+	cl1 = svs.clients;
+	cl += killer;
+	cl1 += killee;
+	
+	
+	sprintf (reason_buff, "@%s", sv_irc_nick->string);
+	if (strcmp (cl1->name, reason_buff) == 0 || strcmp (cl1->name, sv_irc_nick->string) == 0)
+	{
+		Com_Printf ("Not killing admin bot %s\n", reason_buff);
+		return;
+	}
+	if (sv_irc_kills_to_channel->integer)
+	{
+		sprintf (reason_buff, "%s killed %s %s\n", cl->name, cl1->name, DeathNames[kill_method]); 
+		irc_cmd_msg (session, sv_irc_channel->string, reason_buff);
+	}
+
+	Com_Printf ("IRC %s killed %s\n", cl->name, cl1->name);
+
+	if (kill_method < 0 || kill_method >= ARRAY_LEN(DeathNames))
+		sprintf (reason_buff, "%s killed you", cl->name);
+	else
+		sprintf (reason_buff, "%s killed you %s", cl->name, DeathNames[kill_method]);
+	
+	if (sv_irc_kick_on_kill->integer)
+	{
+		if (irc_cmd_kick (session, cl1->name, sv_irc_channel->string, reason_buff))
+		{
+			Com_Printf ("Kicked %s for being dead\n", cl1->name);
+			kick_bot (cl1->name);
+		}
+		else
+			Com_Printf ("Kick failed, does qircbot have ops?\n");
+	}
 }
 
 void irc_send_chat (const char * text, char * nick)
@@ -116,7 +212,7 @@ static void add_bot (const char *nick)
 	
 	//Add bot type
 	//If Op, make them badass
-	if (strncmp (nick, "@", 1) == 0)
+	if (strncmp (nick, "@", 1) == 0 || strcmp (nick, sv_irc_nick->string) == 0)
 	{
 		Q_strcat (addbot_buff, sizeof(addbot_buff), "xaero");
 		Q_strcat (addbot_buff, sizeof(addbot_buff), " 5 ");
@@ -215,6 +311,28 @@ void event_connect (irc_session_t * session, const char * event, const char * or
 	char channel[16];
 
 	Com_Printf ("Connected to IRC server\n");
+
+	if (strcmp (sv_irc_autosend_cmd->string, "") == 0 &&
+			strcmp (sv_irc_autosend_nick->string, "") > 0)
+	{
+		Com_Printf ("Error! sv_autosend_nick specified but not sv_autosend_cmd\n");
+	}
+	else if (strcmp (sv_irc_autosend_cmd->string, "") > 0 &&
+			strcmp (sv_irc_autosend_nick->string, "") == 0)
+	{
+		Com_Printf ("Error! sv_autosend_cmd specified but not sv_autosend_nick\n");
+	}
+	else
+	{
+		if (sv_irc_autosend_delay->integer)
+		{
+			Com_Printf ("Waiting %i seconds before sending sv_autosend_cmd\n", sv_irc_autosend_delay->integer);
+			sleep (sv_irc_autosend_delay->integer);
+		}
+		Com_Printf ("Sending sv_autosend_cmd to %s\n", sv_irc_autosend_nick->string);
+		irc_cmd_msg (session, sv_irc_autosend_nick->string, sv_irc_autosend_cmd->string);
+	}
+
 	//Sleep until q3 server is ready to add bots FIXME
 	while (!botlibsetup)
 	{
@@ -244,7 +362,7 @@ void event_nick (irc_session_t * session, const char * event, const char * origi
 	Com_Printf ("%s has changed its nick to %s\n", nickbuf, params[0]);
 
 	//Kick and rejoin the bot
-	kick_bot (nickbuf);
+	kick_bot (origin);
 	add_bot (params[0]);
 }
 
@@ -260,10 +378,8 @@ void event_privmsg (irc_session_t * session, const char * event, const char * or
 
 void event_join (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
-	//FIXME
-	
 	if (strcmp (origin, sv_irc_nick->string) == 0)
-		Com_Printf ("Ignoring qircbot joining channel\n");
+		Com_Printf ("Ignoring self joining channel\n");
 	else
 		add_bot (origin);
 }
@@ -280,7 +396,7 @@ void event_kick (irc_session_t * session, const char * event, const char * origi
 
 void event_ctcp_action (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
-	char serversay_string[255];
+	char serversay_string[1024];
 	
 	sprintf (serversay_string, "say %s %s\n", origin, params[1]);
 	Com_Printf ("From %s: %s\n", sv_irc_channel->string, serversay_string);
@@ -387,7 +503,10 @@ int irc_init (void)
 	pthread_t irc_thread[2];
 	irc_callbacks_t callbacks;
 	int i;
-
+	
+	old_killer = BOT_LIMIT + 1;
+	old_kill_method = 255;
+	old_killee = BOT_LIMIT + 1;
 	// Init it
 	memset (&callbacks, 0, sizeof(callbacks));
 
@@ -404,13 +523,23 @@ int irc_init (void)
 	callbacks.event_ctcp_rep = event_ctcp_rep;
 	
 	// Init cvars
-	sv_irc_nick  = Cvar_Get ("sv_irc_nick", QIRCBOT_NICK, CVAR_ARCHIVE);
-	sv_irc_server  = Cvar_Get ("sv_irc_server", QIRCBOT_SERVER, CVAR_ARCHIVE);
-	sv_irc_channel  = Cvar_Get ("sv_irc_channel", QIRCBOT_CHANNEL, CVAR_ARCHIVE);
+	sv_irc_nick  = Cvar_Get ("sv_irc_nick", QIRCBOT_NICK, CVAR_SERVERINFO);
+	sv_irc_server  = Cvar_Get ("sv_irc_server", QIRCBOT_SERVER, CVAR_SERVERINFO);
+	sv_irc_channel  = Cvar_Get ("sv_irc_channel", QIRCBOT_CHANNEL, CVAR_SERVERINFO);
 	sv_irc_bottype = Cvar_Get ("sv_irc_bottype", QIRCBOT_DEFAULTBOT, CVAR_ARCHIVE);
 	sv_irc_enabled = Cvar_Get ("sv_irc_enabled", "1", CVAR_ARCHIVE);
 	sv_irc_botskill = Cvar_Get ("sv_irc_botskill", "1", CVAR_ARCHIVE);
-	
+	sv_irc_kick_on_kill = Cvar_Get ("sv_irc_kick_on_kill", "0", CVAR_ARCHIVE);
+	sv_irc_kills_to_channel = Cvar_Get ("sv_irc_kills_to_channel", "0", CVAR_ARCHIVE);
+
+	sv_irc_autosend_nick = Cvar_Get ("sv_irc_autosend_nick", "", CVAR_ARCHIVE);
+	sv_irc_autosend_cmd = Cvar_Get ("sv_irc_autosend_cmd", "", CVAR_ARCHIVE);
+	sv_irc_autosend_delay = Cvar_Get ("sv_irc_autosend_delay", "2", CVAR_ARCHIVE);
+
+	//Set to TDM if set to kick on kills
+	if (sv_irc_kick_on_kill->integer)
+		Cvar_Set ("g_gametype", "3");
+
 	// Init botnicks
 	
 	for (i = 0; i < BOT_LIMIT; i++)
