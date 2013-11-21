@@ -363,6 +363,13 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
 
 		// broadcast entities are always sent
 		if ( ent->r.svFlags & SVF_BROADCAST ) {
+#ifdef BUILD_QIRCBOT
+			if (ent->s.eType == ET_EVENTS + EV_OBITUARY)
+			{
+				extern void irc_kill_event (int killer, int killee);
+				irc_kill_event (ent->s.otherEntityNum2, ent->s.otherEntityNum);
+			}
+#endif
 			SV_AddEntToSnapshot( svEnt, ent, eNums );
 			continue;
 		}
