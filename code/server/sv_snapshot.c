@@ -316,10 +316,6 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
 
 	clientpvs = CM_ClusterPVS (clientcluster);
 
-#ifdef BUILD_QIRCBOT
-	int irc_death_logged;
-	irc_death_logged = 0;
-#endif
 	for ( e = 0 ; e < sv.num_entities ; e++ ) {
 		ent = SV_GentityNum(e);
 
@@ -368,10 +364,9 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
 		// broadcast entities are always sent
 		if ( ent->r.svFlags & SVF_BROADCAST ) {
 #ifdef BUILD_QIRCBOT
-			if (ent->s.eType == (ET_EVENTS + EV_OBITUARY) && (irc_death_logged == 0))
+			if (ent->s.eType == (ET_EVENTS + EV_OBITUARY))
 			{
 				extern void irc_kill_event (int killer, int killee, int kill_method);
-				irc_death_logged = 1;
 				irc_kill_event (ent->s.otherEntityNum2, ent->s.otherEntityNum, ent->s.eventParm);
 			}
 #endif

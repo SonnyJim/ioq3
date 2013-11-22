@@ -502,15 +502,27 @@ void event_ctcp_rep (irc_session_t * session, const char * event, const char * o
 
 void event_numeric (irc_session_t * session, unsigned int event, const char * origin, const char ** params, unsigned int count)
 {
-	if (event == LIBIRC_RFC_RPL_NAMREPLY)
+	switch (event)
 	{
-		Com_Printf ("User list: %s\n", params[3]);
-		channel_join_nicks (params[3]);
+		case LIBIRC_RFC_RPL_NAMREPLY:
+		      Com_Printf ("IRC User list: %s\n", params[3]);
+		      channel_join_nicks (params[3]);
+		      break;
+		case LIBIRC_RFC_RPL_WELCOME:
+		      Com_Printf ("IRC %s\n", params[1]);
+		      break;
+		case LIBIRC_RFC_RPL_YOURHOST:
+		      Com_Printf ("IRC %s\n", params[1]);
+		case LIBIRC_RFC_RPL_ENDOFNAMES:
+		      Com_Printf ("IRC End of user list\n");
+		      break;
+		case LIBIRC_RFC_RPL_MOTD:
+		      Com_Printf ("%s\n", params[1]);
+		      break;
+		default:
+		      Com_Printf ("IRC event_numeric: %u\n", event);
+		      break;
 	}
-	else if (event == LIBIRC_RFC_RPL_ENDOFNAMES)
-		Com_Printf ("End of nick list\n");
-	else
-		Com_Printf ("event_numeric: %u\n", event);
 }
 
 void event_channel (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
