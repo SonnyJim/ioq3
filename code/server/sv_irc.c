@@ -85,6 +85,10 @@ cvar_t *sv_irc_autosend_nick;
 cvar_t *sv_irc_autosend_cmd;
 cvar_t *sv_irc_autosend_delay;
 
+cvar_t *sv_irc_autosend1_nick;
+cvar_t *sv_irc_autosend1_cmd;
+cvar_t *sv_irc_autosend1_delay;
+
 int old_killer, old_killee, old_kill_method;
 
 void irc_kill_event (int killer, int killee, int kill_method)
@@ -112,16 +116,16 @@ void irc_kill_event (int killer, int killee, int kill_method)
 	cl1 += killee;
 	
 	
-	sprintf (reason_buff, "@%s", sv_irc_nick->string);
-	if (strcmp (cl1->name, reason_buff) == 0 || strcmp (cl1->name, sv_irc_nick->string) == 0)
-	{
-		Com_Printf ("Not killing admin bot %s\n", reason_buff);
-		return;
-	}
 	if (sv_irc_kills_to_channel->integer)
 	{
 		sprintf (reason_buff, "%s killed %s %s\n", cl->name, cl1->name, DeathNames[kill_method]); 
 		irc_cmd_msg (session, sv_irc_channel->string, reason_buff);
+	}
+	
+	if (strcmp (cl1->name, sv_irc_nick->string) == 0)
+	{
+		Com_Printf ("Cowardly refusing to kill admin bot %s\n", sv_irc_nick->string);
+		return;
 	}
 
 	Com_Printf ("IRC %s killed %s\n", cl->name, cl1->name);
@@ -133,13 +137,18 @@ void irc_kill_event (int killer, int killee, int kill_method)
 	
 	if (sv_irc_kick_on_kill->integer)
 	{
+		if (strncmp (cl1->name, "@", 1) == 0)
+		{	
+			//Trying to kick op
+
+		}
 		if (irc_cmd_kick (session, cl1->name, sv_irc_channel->string, reason_buff))
 		{
 			Com_Printf ("Kicked %s for being dead\n", cl1->name);
-			kick_bot (cl1->name);
 		}
 		else
-			Com_Printf ("Kick failed, does qircbot have ops?\n");
+			Com_Printf ("IRC Kick failed, does qircbot have ops?\n");
+		kick_bot (cl1->name);
 	}
 }
 
@@ -165,16 +174,28 @@ static void kick_bot (const char * nick)
 {
 	int i;
 	char kickbot_buff[255];
+	char op_buff[255];
 
 	Com_Printf ("kick bot looking for nick %s\n", nick);
+
+	sprintf (op_buff, "@%s", nick);
 
 	for (i = 0; i < BOT_LIMIT; i++)
 	{
 		if (strcmp (botnicks[i], nick) == 0)
 		{
 			Com_Printf ("Kicking bot %s from %i\n", botnicks[i], i);
-			sprintf (kickbot_buff, "kick %s", botnicks[i]);
+			sprintf (kickbot_buff, "kick %s\n", botnicks[i]);
 			Com_Printf ("Kickbot string %s\n", kickbot_buff);
+			Cbuf_ExecuteText (EXEC_APPEND, kickbot_buff);
+			strcpy (botnicks[i], "");
+			return;
+		}
+		if (strcmp (botnicks[i], op_buff) == 0)
+		{
+			//Nick was added as a channel op
+			Com_Printf ("Found %s as Op %s\n", nick, botnicks[i]);
+			sprintf (kickbot_buff, "kick %s\n", op_buff);
 			Cbuf_ExecuteText (EXEC_APPEND, kickbot_buff);
 			strcpy (botnicks[i], "");
 			return;
@@ -188,7 +209,9 @@ static void kick_bot (const char * nick)
 
 static void add_bot (const char *nick)
 {
+	char addbot_buff[255];
 	int i;
+
 
 	if (bot_count > BOT_LIMIT)
 	{
@@ -204,18 +227,33 @@ static void add_bot (const char *nick)
 			Com_Printf ("%s already exists, ignoring\n", botnicks[i]);
 			return;
 		}
+		sprintf (addbot_buff, "@%s", nick);
+		if (strcmp (botnicks[i], addbot_buff) == 0)
+		{
+			Com_Printf ("%s already exists as %s, ignoring\n", botnicks[i], addbot_buff);
+			return;
+		}
+
+		if (strncmp (nick, "@", 1) == 0)
+		{
+			strcpy (addbot_buff, "");
+			strcpy (addbot_buff, nick);
+			memmove (addbot_buff, addbot_buff + 1, strlen (addbot_buff + 1));
+			if (strcmp (nick, addbot_buff) == 0)
+			{
+				Com_Printf ("Found %s deopped as %s, ignoring\n", nick, addbot_buff);
+				return;
+			}
+		}
 	}
 
-	char addbot_buff[128];
-	strcpy (addbot_buff, "");
-	Q_strcat (addbot_buff, sizeof(addbot_buff), "addbot ");
-	
+	sprintf (addbot_buff, "addbot");
+
 	//Add bot type
 	//If Op, make them badass
 	if (strncmp (nick, "@", 1) == 0 || strcmp (nick, sv_irc_nick->string) == 0)
 	{
-		Q_strcat (addbot_buff, sizeof(addbot_buff), "xaero");
-		Q_strcat (addbot_buff, sizeof(addbot_buff), " 5 ");
+		sprintf (addbot_buff, "%s xaero 5", addbot_buff);
 	}
 	else
 	{
@@ -223,7 +261,7 @@ static void add_bot (const char *nick)
 		{
 			i = random () * NUM_BOTTYPES;
 			Com_Printf ("Picking random bot %s\n", bottypes[i]);
-			Q_strcat (addbot_buff, sizeof(addbot_buff), bottypes[i]);	
+			sprintf (addbot_buff, "%s %s", addbot_buff, bottypes[i]);
 		}
 		else
 			Q_strcat (addbot_buff, sizeof(addbot_buff), sv_irc_bottype->string);
@@ -232,15 +270,14 @@ static void add_bot (const char *nick)
 		{
 			i = random () * 5;
 			Com_Printf ("Picking random skill %i\n", i);
-			sprintf (addbot_buff, "%s %i ", addbot_buff, i);
+			sprintf (addbot_buff, "%s %i", addbot_buff, i);
 		}
 		else
-			sprintf (addbot_buff, "%s %i ", addbot_buff, sv_irc_botskill->integer);
+			sprintf (addbot_buff, "%s %i", addbot_buff, sv_irc_botskill->integer);
 	}
-	// Add team/delay
-	Q_strcat (addbot_buff, sizeof(addbot_buff), "blue 0 ");
-	// Add the name
-	Q_strcat (addbot_buff, sizeof(addbot_buff), nick);
+	// Add team/delay/name
+	sprintf (addbot_buff, "%s blue 0 %s\n", addbot_buff, nick);
+	
 	Com_Printf ("Executing: %s\n", addbot_buff);
 	Cbuf_ExecuteText (EXEC_APPEND, addbot_buff);
 
@@ -305,6 +342,48 @@ static void channel_join_nicks (const char * nicklist)
 	}
 }
 
+int check_autosend_cvars (void)
+{
+	if (strcmp (sv_irc_autosend_cmd->string, "") == 0 &&
+			strcmp (sv_irc_autosend_nick->string, "") > 0)
+	{
+		Com_Printf ("Error! sv_autosend_nick specified but not sv_autosend_cmd\n");
+		return 0;
+	}
+	else if (strcmp (sv_irc_autosend_cmd->string, "") > 0 &&
+			strcmp (sv_irc_autosend_nick->string, "") == 0)
+	{
+		Com_Printf ("Error! sv_autosend_cmd specified but not sv_autosend_nick\n");
+		return 0;
+	}
+	else if (strcmp (sv_irc_autosend_cmd->string, "") == 0 &&
+			strcmp (sv_irc_autosend_nick->string, "") == 0)
+		return 0;
+	else
+		return 1;
+}
+
+int check_autosend1_cvars (void)
+{
+	if (strcmp (sv_irc_autosend1_cmd->string, "") == 0 &&
+			strcmp (sv_irc_autosend1_nick->string, "") > 0)
+	{
+		Com_Printf ("Error! sv_autosend1_nick specified but not sv_autosend1_cmd\n");
+		return 0;
+	}
+	else if (strcmp (sv_irc_autosend1_cmd->string, "") > 0 &&
+			strcmp (sv_irc_autosend1_nick->string, "") == 0)
+	{
+		Com_Printf ("Error! sv_autosend1_cmd specified but not sv_autosend1_nick\n");
+		return 0;
+	}
+	else if (strcmp (sv_irc_autosend1_cmd->string, "") == 0 &&
+			strcmp (sv_irc_autosend1_nick->string, "") == 0)
+		return 0;
+	else
+		return 1;
+}
+
 //Called when connected to a server
 void event_connect (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
 {
@@ -312,17 +391,7 @@ void event_connect (irc_session_t * session, const char * event, const char * or
 
 	Com_Printf ("Connected to IRC server\n");
 
-	if (strcmp (sv_irc_autosend_cmd->string, "") == 0 &&
-			strcmp (sv_irc_autosend_nick->string, "") > 0)
-	{
-		Com_Printf ("Error! sv_autosend_nick specified but not sv_autosend_cmd\n");
-	}
-	else if (strcmp (sv_irc_autosend_cmd->string, "") > 0 &&
-			strcmp (sv_irc_autosend_nick->string, "") == 0)
-	{
-		Com_Printf ("Error! sv_autosend_cmd specified but not sv_autosend_nick\n");
-	}
-	else
+	if (check_autosend_cvars ())
 	{
 		if (sv_irc_autosend_delay->integer)
 		{
@@ -331,6 +400,18 @@ void event_connect (irc_session_t * session, const char * event, const char * or
 		}
 		Com_Printf ("Sending sv_autosend_cmd to %s\n", sv_irc_autosend_nick->string);
 		irc_cmd_msg (session, sv_irc_autosend_nick->string, sv_irc_autosend_cmd->string);
+	
+		if (sv_irc_autosend1_delay->integer)
+		{
+			Com_Printf ("Waiting %i seconds before sending sv_autosend_cmd\n", sv_irc_autosend_delay->integer);
+			sleep (sv_irc_autosend1_delay->integer);
+		}
+
+		if (strcmp (sv_irc_autosend1_cmd->string, "") > 0)
+		{
+			Com_Printf ("Sending sv_autosend_cmd to %s\n", sv_irc_autosend_nick->string);
+			irc_cmd_msg (session, sv_irc_autosend_nick->string, sv_irc_autosend_cmd->string);
+		}
 	}
 
 	//Sleep until q3 server is ready to add bots FIXME
@@ -348,7 +429,18 @@ void event_connect (irc_session_t * session, const char * event, const char * or
 	}
 	else
 		Com_Printf ("Joined %s\n", channel);
-	
+
+	if (check_autosend1_cvars ())
+	{
+		if (sv_irc_autosend1_delay->integer)
+		{
+			Com_Printf ("Waiting %i seconds before sending sv_autosend_cmd\n", sv_irc_autosend1_delay->integer);
+			sleep (sv_irc_autosend1_delay->integer);
+		}
+
+		Com_Printf ("Sending sv_autosend_cmd to %s\n", sv_irc_autosend1_nick->string);
+		irc_cmd_msg (session, sv_irc_autosend1_nick->string, sv_irc_autosend1_cmd->string);
+	}
 }
 
 void event_nick (irc_session_t * session, const char * event, const char * origin, const char ** params, unsigned int count)
@@ -456,6 +548,27 @@ void *irc_ping (void *threadid)
 		sleep (CTCP_PING_DELAY);
 	}
 }
+void *irc_connection_monitor (void *threadid)
+{
+	int connection_attempts = 0;
+
+	while (1)
+	{
+		sleep (30);
+		if (!irc_is_connected (session))
+		{
+			connection_attempts++;
+			Com_Printf ("IRC Connection monitor: %i\n", connection_attempts);
+			if (connection_attempts > 4)
+			{
+				Com_Printf ("Restarting IRC connection");
+				connection_attempts = 0;
+				irc_disconnect (session);
+			}
+		}
+	}
+
+}
 
 void *irc_monitor (void *threadid)
 {
@@ -536,6 +649,10 @@ int irc_init (void)
 	sv_irc_autosend_cmd = Cvar_Get ("sv_irc_autosend_cmd", "", CVAR_ARCHIVE);
 	sv_irc_autosend_delay = Cvar_Get ("sv_irc_autosend_delay", "2", CVAR_ARCHIVE);
 
+	sv_irc_autosend1_nick = Cvar_Get ("sv_irc_autosend1_nick", "", CVAR_ARCHIVE);
+	sv_irc_autosend1_cmd = Cvar_Get ("sv_irc_autosend1_cmd", "", CVAR_ARCHIVE);
+	sv_irc_autosend1_delay = Cvar_Get ("sv_irc_autosend1_delay", "2", CVAR_ARCHIVE);
+
 	//Set to TDM if set to kick on kills
 	if (sv_irc_kick_on_kill->integer)
 		Cvar_Set ("g_gametype", "3");
@@ -568,6 +685,9 @@ int irc_init (void)
 		Com_Printf ("Create IRC monitor thread failed: %s\n", strerror(errno));
 	if (pthread_create (&irc_thread[IRC_PING], NULL, irc_ping, (void  *)0))
 		Com_Printf ("Create IRC Ping thread failed: %s\n", strerror(errno));
+
+	if (pthread_create (&irc_thread[IRC_MONITOR], NULL, irc_connection_monitor, (void  *)0))
+		Com_Printf ("Create IRC Connection monitor thread failed: %s\n", strerror(errno));
 	return 0;
 }
 
